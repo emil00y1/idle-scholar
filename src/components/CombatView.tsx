@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { AbilitySlot, CombatState, UnitInstance } from '@/lib/game/types';
+import { AbilitySlot, CombatState, Consumable, UnitInstance } from '@/lib/game/types';
 import { CONSUMABLES } from '@/lib/game/constants';
 
 interface CombatViewProps {
@@ -17,6 +17,7 @@ interface CombatViewProps {
   onEndCombat: () => void;
   onToggleAutoRepeat: () => void;
   onToggleStopOnInventoryFull: () => void;
+  consumables: Consumable[];
 }
 
 interface FloatingText {
@@ -27,6 +28,15 @@ interface FloatingText {
   type: 'damage' | 'heal' | 'poison' | 'crit';
   unitId: string;
 }
+
+const ABILITY_SLOT_ORDER: Record<AbilitySlot, number> = {
+  1: 1,
+  2: 2,
+  3: 3,
+  4: 4,
+  5: 5,
+  F: 6,
+};
 
 export const CombatView: React.FC<CombatViewProps> = ({
   combat,
@@ -41,6 +51,7 @@ export const CombatView: React.FC<CombatViewProps> = ({
   onEndCombat,
   onToggleAutoRepeat,
   onToggleStopOnInventoryFull,
+  consumables,
 }) => {
   const [isEngaged, setIsEngaged] = useState(false);
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
@@ -281,7 +292,7 @@ export const CombatView: React.FC<CombatViewProps> = ({
   };
 
   const hero = combat.playerArmy[0];
-  const abilities = [...combat.abilities].sort((a, b) => a.slot - b.slot);
+  const abilities = [...combat.abilities].sort((a, b) => ABILITY_SLOT_ORDER[a.slot] - ABILITY_SLOT_ORDER[b.slot]);
   const logEntries = combat.history;
 
   return (
@@ -359,7 +370,7 @@ export const CombatView: React.FC<CombatViewProps> = ({
           <div className="flex flex-col items-center gap-1 w-full">
             <div className="text-[8px] font-black uppercase tracking-[0.2em] text-emerald-500/70 mb-1">Consumables (Q for Potion)</div>
             <div className="flex flex-wrap justify-center gap-3">
-              {CONSUMABLES.map((c) => {
+              {(consumables || []).map((c) => {
                 const count = combat.consumables[c.id] || 0;
                 const canUse = count > 0 && combat.potionCooldownRemaining <= 0 && isEngaged && combat.status === 'ongoing';
                 const isHp = c.id === 'hp_potion';

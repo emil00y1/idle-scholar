@@ -1,20 +1,21 @@
 'use client';
 
 import React from 'react';
-import { GameState, TalentNode } from '@/lib/game/types';
+import { ClassTalentTree, GameState, TalentNode, UnitType } from '@/lib/game/types';
 import { TALENT_TREES } from '@/lib/game/constants';
 import { useSelectionScroll } from '@/lib/game/useSelectionScroll';
 
 interface TalentTreeProps {
   state: GameState;
   onAllocate: (nodeId: string) => void;
+  talentTrees: Record<UnitType, ClassTalentTree>;
 }
 
-export function TalentTree({ state, onAllocate }: TalentTreeProps) {
+export function TalentTree({ state, onAllocate, talentTrees }: TalentTreeProps) {
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   if (!state.heroClass) return null;
 
-  const tree = TALENT_TREES[state.heroClass];
+  const tree = talentTrees[state.heroClass];
   const sortedNodes = [...tree.nodes].sort((a, b) => {
     if ((a.y ?? 0) !== (b.y ?? 0)) return (a.y ?? 0) - (b.y ?? 0);
     return (a.x ?? 0) - (b.x ?? 0);

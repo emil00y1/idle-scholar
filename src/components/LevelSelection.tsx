@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { LEVELS } from '@/lib/game/constants';
+import { Level } from '@/lib/game/types';
 import { useSelectionScroll } from '@/lib/game/useSelectionScroll';
 
 interface LevelSelectionProps {
@@ -14,6 +15,7 @@ interface LevelSelectionProps {
   onStartCombat: (levelId: string) => void;
   onToggleAutoRepeat: () => void;
   onToggleStopOnInventoryFull: () => void;
+  levels: Level[];
 }
 
 export const LevelSelection: React.FC<LevelSelectionProps> = ({
@@ -26,9 +28,10 @@ export const LevelSelection: React.FC<LevelSelectionProps> = ({
   onStartCombat,
   onToggleAutoRepeat,
   onToggleStopOnInventoryFull,
+  levels,
 }) => {
   const [selectedIndex, setSelectedIndex] = React.useState(0);
-  const displayedLevels = LEVELS
+  const displayedLevels = (levels || [])
     .filter((level) => unlockedLevels.includes(level.id))
     .sort((a, b) => b.difficulty - a.difficulty);
   const registerSelectionTarget = useSelectionScroll<HTMLDivElement>(selectedIndex, [displayedLevels.length]);

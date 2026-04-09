@@ -1,14 +1,15 @@
 'use client';
 
 import React from 'react';
-import { UnitType } from '@/lib/game/types';
+import { ClassInfo, UnitType } from '@/lib/game/types';
 import { CLASS_INFO } from '@/lib/game/constants';
 
 interface ClassSelectionProps {
   onSelect: (heroClass: UnitType) => void;
+  classInfo: Record<UnitType, ClassInfo>;
 }
 
-export const ClassSelection: React.FC<ClassSelectionProps> = ({ onSelect }) => {
+export const ClassSelection: React.FC<ClassSelectionProps> = ({ onSelect, classInfo }) => {
   const classes: UnitType[] = ['knight', 'warrior', 'archer', 'mage', 'healer'];
   const [selectedIndex, setSelectedIndex] = React.useState(0);
 
@@ -42,7 +43,7 @@ export const ClassSelection: React.FC<ClassSelectionProps> = ({ onSelect }) => {
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {classes.map((type, index) => {
-            const info = CLASS_INFO[type];
+            const info = classInfo[type];
             const recommended = type === 'knight';
             const isSelected = index === selectedIndex;
             return (

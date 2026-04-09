@@ -1,10 +1,29 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { GameState, UnitType, UnitInstance, CombatTurn, EquipmentSlot, HeroBonuses, UnitStats, ActiveMission, CombatAbilityState, AbilitySlot, Equipment, Achievement, Consumable, ActiveBuff } from './types';
-import { CLASS_INFO, TALENT_TREES, LEVELS, STAT_TRAINING, EQUIPMENT_DATABASE, MISSIONS, rollMissionLoot, scaleMissionRewards, ABILITY_DATABASE, resolveAbilityLoadout, ACHIEVEMENTS, ARTIFACTS, CONSUMABLES, SHOP_ITEMS } from './constants';
+import { Artifact, ClassInfo, CombatAbilityDefinition, GameState, Level, UnitType, UnitInstance, CombatTurn, EquipmentSlot, HeroBonuses, UnitStats, ActiveMission, CombatAbilityState, AbilitySlot, Equipment, Achievement, Consumable, ActiveBuff } from './types';
+import { CLASS_INFO as DEFAULT_CLASS_INFO, TALENT_TREES, LEVELS as DEFAULT_LEVELS, STAT_TRAINING, EQUIPMENT_DATABASE as DEFAULT_EQUIPMENT_DATABASE, MISSIONS as DEFAULT_MISSIONS, rollMissionLoot, scaleMissionRewards, ABILITY_DATABASE as DEFAULT_ABILITY_DATABASE, resolveAbilityLoadout, ACHIEVEMENTS as DEFAULT_ACHIEVEMENTS, ARTIFACTS as DEFAULT_ARTIFACTS, CONSUMABLES as DEFAULT_CONSUMABLES, SHOP_ITEMS as DEFAULT_SHOP_ITEMS } from './constants';
+import { getGameData, savePlayerState, loadPlayerState } from './actions';
+
+type ShopItem = {
+  equipmentId: string;
+  price: number;
+};
+
+type GameDataPayload = {
+  classes: Array<Omit<ClassInfo, 'type'> & { id: UnitType }>;
+  abilities: Array<Omit<CombatAbilityDefinition, 'slot' | 'target'> & { slot: string; target: string }>;
+  equipment: Equipment[];
+  levels: Level[];
+  missions: typeof DEFAULT_MISSIONS;
+  artifacts: Artifact[];
+  achievements: Achievement[];
+  consumables: Consumable[];
+  shopItems: ShopItem[];
+};
 
 const SAVE_KEY = 'idle-scholar-v2-save';
+const PLAYER_ID = 'default-player'; // In a real app, this would be the logged-in user ID
 const DEFAULT_INVENTORY_LIMIT = 120;
 const DEFAULT_ARTIFACT_SLOTS = 2;
 
@@ -142,7 +161,7 @@ function scoreItemForClass(item: Equipment, heroClass: UnitType) {
   }, 0);
 }
 
-function getAchievementProgress(snapshot: GameState, achievement: Achievement) {
+function getAchievementProgress(snapshot: GameState, achievement: Achievement, classInfo: Record<UnitType, ClassInfo>) {
   switch (achievement.requirement.type) {
     case 'kills':
       return snapshot.stats.totalEnemiesDefeated;
@@ -151,7 +170,7 @@ function getAchievementProgress(snapshot: GameState, achievement: Achievement) {
     case 'coins':
       return snapshot.totalCoinsEarned;
     case 'power': {
-      const stats = snapshot.heroClass ? computeHeroStats(snapshot) : null;
+      const stats = snapshot.heroClass ? computeHeroStats(snapshot, classInfo) : null;
       return stats ? stats.hp + stats.atk + stats.matk + stats.def + stats.mdef + stats.spd * 5 + stats.critChance * 1000 + stats.eva * 1000 : 0;
     }
     default:
@@ -159,12 +178,12 @@ function getAchievementProgress(snapshot: GameState, achievement: Achievement) {
   }
 }
 
-function applyAchievementRewards(snapshot: GameState): GameState {
+function applyAchievementRewards(snapshot: GameState, achievements: Achievement[], classInfo: Record<UnitType, ClassInfo>): GameState {
   let nextState = snapshot;
 
-  for (const achievement of ACHIEVEMENTS) {
+  for (const achievement of achievements) {
     if (nextState.earnedAchievements.includes(achievement.id)) continue;
-    if (getAchievementProgress(nextState, achievement) < achievement.requirement.value) continue;
+    if (getAchievementProgress(nextState, achievement, classInfo) < achievement.requirement.value) continue;
 
     const rewards = achievement.rewards || {};
     nextState = {
@@ -208,21 +227,29 @@ function addLootToInventory(
   return { inventory, equippedGear };
 }
 
-function createCombatEncounter(snapshot: GameState, levelId: string) {
-  const level = LEVELS.find((entry) => entry.id === levelId);
+function createCombatEncounter(
+  snapshot: GameState,
+  levelId: string,
+  levels: Level[],
+  classInfo: Record<UnitType, ClassInfo>,
+  abilityDatabase: Record<string, CombatAbilityDefinition>,
+) {
+  const level = levels.find((entry) => entry.id === levelId);
   if (!level || !snapshot.heroClass) return null;
 
-  const heroStats = computeHeroStats(snapshot);
+  const heroStats = computeHeroStats(snapshot, classInfo);
   const calcInterval = (spd: number) => Math.max(1, Math.ceil(100 / spd));
-  const info = CLASS_INFO[snapshot.heroClass];
+  const info = classInfo[snapshot.heroClass];
   const heroInterval = calcInterval(heroStats.spd);
   const bonuses = computeHeroBonuses(snapshot.talentsOwned, snapshot.heroClass);
-  const abilities = resolveCombatAbilities(snapshot.heroClass, snapshot.heroLevel, bonuses);
+  const abilities = resolveCombatAbilities(snapshot.heroClass, snapshot.heroLevel, bonuses, abilityDatabase);
 
   const hero: UnitInstance = {
     instanceId: 'hero',
+    id: 'hero',
     type: snapshot.heroClass,
     name: info.name,
+    icon: info.icon,
     stats: { ...heroStats },
     isPlayer: true,
     maxHp: heroStats.maxHp,
@@ -234,8 +261,10 @@ function createCombatEncounter(snapshot: GameState, levelId: string) {
     const interval = calcInterval(enemy.stats.spd);
     return {
       instanceId: `e-${enemy.id}-${index}`,
+      id: enemy.id,
       type: enemy.type,
       name: enemy.name,
+      icon: enemy.icon,
       stats: { ...enemy.stats, critChance: enemy.stats.critChance ?? 0, thorns: 0, lifesteal: 0, damageReduction: 0 },
       maxHp: enemy.stats.maxHp,
       isPlayer: false,
@@ -329,10 +358,11 @@ export function computeHeroBonuses(talentsOwned: Record<string, number>, heroCla
   return b;
 }
 
-export function computeHeroStats(state: GameState): UnitStats {
+export function computeHeroStats(state: GameState, classInfo: Record<UnitType, ClassInfo>): UnitStats {
   if (!state.heroClass) return { hp: 0, maxHp: 0, atk: 0, matk: 0, def: 0, mdef: 0, spd: 0, eva: 0, critChance: 0, thorns: 0, lifesteal: 0, damageReduction: 0 };
 
-  const info = CLASS_INFO[state.heroClass];
+  const info = classInfo[state.heroClass];
+  if (!info) return { hp: 0, maxHp: 0, atk: 0, matk: 0, def: 0, mdef: 0, spd: 0, eva: 0, critChance: 0, thorns: 0, lifesteal: 0, damageReduction: 0 };
   const g = state.heroLevel - 1;
 
   let hp = info.baseStats.hp + g * info.growthStats.hp;
@@ -449,8 +479,14 @@ function getTrainingPurchaseQuote(
   return { purchases, totalCost, canAfford };
 }
 
-function resolveCombatAbilities(heroClass: UnitType, heroLevel: number, bonuses: HeroBonuses): CombatAbilityState[] {
-  return resolveAbilityLoadout(heroClass, bonuses.specials).map((ability) => {
+function resolveCombatAbilities(
+  heroClass: UnitType,
+  heroLevel: number,
+  bonuses: HeroBonuses,
+  abilityDatabase: Record<string, CombatAbilityDefinition>,
+): CombatAbilityState[] {
+  return resolveAbilityLoadout(heroClass, bonuses.specials).map((abilityDef) => {
+    const ability = abilityDatabase[abilityDef.id];
     if (!ability) return null;
     return {
       ...ability,
@@ -460,8 +496,8 @@ function resolveCombatAbilities(heroClass: UnitType, heroLevel: number, bonuses:
   }).filter((ability): ability is CombatAbilityState => ability !== null);
 }
 
-function getAbilityCooldown(abilityId: string, bonuses: HeroBonuses) {
-  const baseCooldown = ABILITY_DATABASE[abilityId]?.cooldownTicks ?? 0;
+function getAbilityCooldown(abilityId: string, bonuses: HeroBonuses, abilityDatabase: Record<string, CombatAbilityDefinition>) {
+  const baseCooldown = abilityDatabase[abilityId]?.cooldownTicks ?? 0;
   if (abilityId === 'mage_temporal_shift' && bonuses.specials.has('time_lord')) {
     return Math.max(18, baseCooldown - 8);
   }
@@ -521,70 +557,146 @@ function calculateAbilityDamage(
 export function useGameLoop() {
   const [state, setState] = useState<GameState>(INITIAL_STATE);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [gameData, setGameData] = useState<GameDataPayload | null>(null);
+
   const combatRef = useRef<CombatData | null>(null);
 
-  // --- Load ---
-  useEffect(() => {
-    const saved = localStorage.getItem(SAVE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        const { inventory, equippedGear } = normalizeInventoryAndGear(parsed.inventory, parsed.equippedGear);
-        const inventoryIds = new Set(inventory.map((item) => item.instanceId).filter((id): id is string => Boolean(id)));
-        const artifactsOwned = Array.isArray(parsed.artifactsOwned) ? parsed.artifactsOwned : [];
-        const artifactSlots = typeof parsed.artifactSlots === 'number' ? parsed.artifactSlots : DEFAULT_ARTIFACT_SLOTS;
-        const merged: GameState = {
-          ...INITIAL_STATE,
-          ...parsed,
-          combat: INITIAL_STATE.combat,
-          equippedGear,
-          inventory,
-          artifactShards: parsed.artifactShards || 0,
-          artifactsOwned,
-          equippedArtifacts: (parsed.equippedArtifacts || []).filter((artifactId: string) => artifactsOwned.includes(artifactId)).slice(0, artifactSlots),
-          earnedAchievements: parsed.earnedAchievements || [],
-          lockedItemIds: (parsed.lockedItemIds || []).filter((itemId: string) => inventoryIds.has(itemId)),
-          favoriteItemIds: (parsed.favoriteItemIds || []).filter((itemId: string) => inventoryIds.has(itemId)),
-          autoEquipUpgrades: parsed.autoEquipUpgrades || false,
-          inventoryLimit: parsed.inventoryLimit || DEFAULT_INVENTORY_LIMIT,
-          artifactSlots,
-          combatAutomation: { ...INITIAL_STATE.combatAutomation, ...(parsed.combatAutomation || {}) },
-          activeMissions: parsed.activeMissions || [],
-          completedMissionIds: parsed.completedMissionIds || [],
-          missionCooldowns: parsed.missionCooldowns || {},
-          missionSlots: parsed.missionSlots || 2,
-        };
+  // Helper to get constants (from DB or default)
+  const CLASS_INFO = useMemo(() => {
+    if (!gameData) return DEFAULT_CLASS_INFO;
+    const map = {} as Record<UnitType, ClassInfo>;
+    gameData.classes.forEach((gameClass) => {
+      map[gameClass.id] = {
+        type: gameClass.id,
+        name: gameClass.name,
+        title: gameClass.title,
+        description: gameClass.description,
+        icon: gameClass.icon,
+        baseStats: gameClass.baseStats,
+        growthStats: gameClass.growthStats,
+      };
+    });
+    return map;
+  }, [gameData]);
 
-        // Offline progress
-        const lastTick = parsed.lastTick || Date.now();
-        const diffSec = Math.floor((Date.now() - lastTick) / 1000);
-        if (diffSec > 60 && merged.heroClass && merged.heroLevel > 0) {
-          const rate = merged.heroLevel * 0.5;
-          const gained = Math.floor(rate * diffSec);
-          merged.coins += gained;
-          merged.totalCoinsEarned += gained;
+  const LEVELS = useMemo(() => gameData?.levels ?? DEFAULT_LEVELS, [gameData]);
+  const EQUIPMENT_DATABASE = useMemo(() => gameData?.equipment ?? DEFAULT_EQUIPMENT_DATABASE, [gameData]);
+  const MISSIONS = useMemo(() => gameData?.missions ?? DEFAULT_MISSIONS, [gameData]);
+  const ABILITY_DATABASE = useMemo(() => {
+    if (!gameData) return DEFAULT_ABILITY_DATABASE;
+    const map = {} as Record<string, CombatAbilityDefinition>;
+    gameData.abilities.forEach((ability) => {
+      map[ability.id] = {
+        id: ability.id,
+        name: ability.name,
+        description: ability.description,
+        icon: ability.icon,
+        slot: ability.slot === 'F' ? 'F' : Number(ability.slot) as AbilitySlot,
+        unlockLevel: ability.unlockLevel,
+        target: ability.target as CombatAbilityDefinition['target'],
+        cooldownTicks: ability.cooldownTicks,
+      };
+    });
+    return map;
+  }, [gameData]);
+  const ACHIEVEMENTS = useMemo(() => gameData?.achievements ?? DEFAULT_ACHIEVEMENTS, [gameData]);
+  const ARTIFACTS = useMemo(() => gameData?.artifacts ?? DEFAULT_ARTIFACTS, [gameData]);
+  const CONSUMABLES = useMemo(() => gameData?.consumables ?? DEFAULT_CONSUMABLES, [gameData]);
+  const SHOP_ITEMS = useMemo(() => gameData?.shopItems ?? DEFAULT_SHOP_ITEMS, [gameData]);
+
+  // --- Load Game Data and Player State ---
+  useEffect(() => {
+    async function init() {
+      try {
+        const [fetchedData, fetchedState] = await Promise.all([
+          getGameData(),
+          loadPlayerState(PLAYER_ID)
+        ]);
+
+        const normalizedData = fetchedData as GameDataPayload;
+        setGameData(normalizedData);
+
+        // Fallback to localStorage if no DB state found (for migration)
+        let loadedState = fetchedState;
+        if (!loadedState) {
+          const saved = localStorage.getItem(SAVE_KEY);
+          if (saved) {
+            loadedState = JSON.parse(saved);
+          }
         }
-        setState(applyAchievementRewards(merged));
-      } catch { /* ignore corrupt saves */ }
+
+        if (loadedState) {
+          const { inventory, equippedGear } = normalizeInventoryAndGear(loadedState.inventory, loadedState.equippedGear);
+          const inventoryIds = new Set(inventory.map((item) => item.instanceId).filter((id): id is string => Boolean(id)));
+          const artifactsOwned = Array.isArray(loadedState.artifactsOwned) ? loadedState.artifactsOwned : [];
+          const artifactSlots = typeof loadedState.artifactSlots === 'number' ? loadedState.artifactSlots : DEFAULT_ARTIFACT_SLOTS;
+          
+          const merged: GameState = {
+            ...INITIAL_STATE,
+            ...loadedState,
+            combat: INITIAL_STATE.combat,
+            equippedGear,
+            inventory,
+            artifactShards: loadedState.artifactShards || 0,
+            artifactsOwned,
+            equippedArtifacts: (loadedState.equippedArtifacts || []).filter((artifactId: string) => artifactsOwned.includes(artifactId)).slice(0, artifactSlots),
+            earnedAchievements: loadedState.earnedAchievements || [],
+            lockedItemIds: (loadedState.lockedItemIds || []).filter((itemId: string) => inventoryIds.has(itemId)),
+            favoriteItemIds: (loadedState.favoriteItemIds || []).filter((itemId: string) => inventoryIds.has(itemId)),
+            autoEquipUpgrades: loadedState.autoEquipUpgrades || false,
+            inventoryLimit: loadedState.inventoryLimit || DEFAULT_INVENTORY_LIMIT,
+            artifactSlots,
+            combatAutomation: { ...INITIAL_STATE.combatAutomation, ...(loadedState.combatAutomation || {}) },
+            activeMissions: loadedState.activeMissions || [],
+            completedMissionIds: loadedState.completedMissionIds || [],
+            missionCooldowns: loadedState.missionCooldowns || {},
+            missionSlots: loadedState.missionSlots || 2,
+          };
+
+          // Offline progress
+          const lastTick = loadedState.lastTick || Date.now();
+          const diffSec = Math.floor((Date.now() - lastTick) / 1000);
+          if (diffSec > 60 && merged.heroClass && merged.heroLevel > 0) {
+            const rate = merged.heroLevel * 0.5;
+            const gained = Math.floor(rate * diffSec);
+            merged.coins += gained;
+            merged.totalCoinsEarned += gained;
+          }
+          setState(applyAchievementRewards(merged, normalizedData.achievements || DEFAULT_ACHIEVEMENTS, DEFAULT_CLASS_INFO));
+        }
+      } catch (err) {
+        console.error('Initialization failed', err);
+      } finally {
+        setIsInitialized(true);
+      }
     }
-    setIsInitialized(true);
+    init();
   }, []);
 
-  // --- Save ---
+  // --- Save to DB periodically or on state change ---
+  const lastSaveRef = useRef<number>(Date.now());
   useEffect(() => {
-    if (isInitialized) {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ ...state, lastTick: Date.now() }));
+    if (isInitialized && state.heroClass) {
+      // Save to DB (throttled to avoid spamming the DB)
+      const now = Date.now();
+      if (now - lastSaveRef.current > 5000) { // Save every 5 seconds
+        savePlayerState(PLAYER_ID, { ...state, lastTick: now });
+        lastSaveRef.current = now;
+      }
+
+      // Also keep localStorage as a backup
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ ...state, lastTick: now }));
     }
   }, [state, isInitialized]);
 
   // --- Computed hero stats ---
   const heroStats = useMemo(() => {
     if (!state.heroClass) return null;
-    return computeHeroStats(state);
-  }, [state]);
+    return computeHeroStats(state, CLASS_INFO);
+  }, [state, CLASS_INFO]);
 
   useEffect(() => {
-    setState(prev => applyAchievementRewards(prev));
+    setState(prev => applyAchievementRewards(prev, ACHIEVEMENTS, CLASS_INFO));
   }, [
     heroStats?.hp,
     heroStats?.atk,
@@ -598,6 +710,8 @@ export function useGameLoop() {
     state.completedLevels.length,
     state.totalCoinsEarned,
     state.earnedAchievements.length,
+    ACHIEVEMENTS,
+    CLASS_INFO
   ]);
 
   // --- Class selection ---
@@ -890,9 +1004,9 @@ export function useGameLoop() {
         nextState = { ...nextState, inventory: lootResult.inventory, equippedGear: lootResult.equippedGear };
       }
 
-      return applyAchievementRewards(nextState);
+      return applyAchievementRewards(nextState, ACHIEVEMENTS, CLASS_INFO);
     });
-  }, []);
+  }, [ACHIEVEMENTS, CLASS_INFO]);
 
   const cancelMission = useCallback((missionId: string) => {
     setState(prev => ({
@@ -954,12 +1068,12 @@ export function useGameLoop() {
   // ===== COMBAT =====
 
   const startCombat = useCallback((levelId: string) => {
-    const encounter = createCombatEncounter(state, levelId);
+    const encounter = createCombatEncounter(state, levelId, LEVELS, CLASS_INFO, ABILITY_DATABASE);
     if (!encounter) return;
 
     combatRef.current = encounter.combatData;
     setState(prev => ({ ...prev, combat: encounter.combat }));
-  }, [state]);
+  }, [state, LEVELS, CLASS_INFO, ABILITY_DATABASE]);
 
   const processCombatTick = useCallback(() => {
     setState(prev => {
@@ -1002,7 +1116,7 @@ export function useGameLoop() {
           for (let i = 0; i < 2; i++) {
             newEnemy.push({
               instanceId: `summon-skel-${tick}-${i}`, id: 'skeleton', type: 'warrior', name: 'Risen Skeleton', icon: '💀', maxHp: 2000,
-              stats: { hp: 2000, maxHp: 2000, atk: 150, matk: 0, def: 50, mdef: 50, spd: 15, critChance: 0, thorns: 0, lifesteal: 0, damageReduction: 0 },
+              stats: { hp: 2000, maxHp: 2000, atk: 150, matk: 0, def: 50, mdef: 50, spd: 15, eva: 0, critChance: 0, thorns: 0, lifesteal: 0, damageReduction: 0 },
               isPlayer: false, ticksUntilAttack: skeletonInterval, attackInterval: skeletonInterval, isPoisoned: false,
             });
           }
@@ -1057,7 +1171,7 @@ export function useGameLoop() {
           for (let i = 0; i < 3; i++) {
             newEnemy.push({
               instanceId: `void-tendril-${tick}-${i}`, id: 'tendril', type: 'archer', name: 'Void Tendril', icon: '🎋', maxHp: 5000,
-              stats: { hp: 5000, maxHp: 5000, atk: 250, matk: 0, def: 50, mdef: 50, spd: 25, critChance: 0, thorns: 0, lifesteal: 0, damageReduction: 0 },
+              stats: { hp: 5000, maxHp: 5000, atk: 250, matk: 0, def: 50, mdef: 50, spd: 25, eva: 0, critChance: 0, thorns: 0, lifesteal: 0, damageReduction: 0 },
               isPlayer: false, ticksUntilAttack: tendrilInterval, attackInterval: tendrilInterval, isPoisoned: false,
             });
           }
@@ -1425,7 +1539,7 @@ export function useGameLoop() {
         return wasAlive && target.stats.hp <= 0;
       };
 
-      let cooldown = getAbilityCooldown(ability.id, bonuses);
+      let cooldown = getAbilityCooldown(ability.id, bonuses, ABILITY_DATABASE);
       let triggered = false;
 
       // Apply and consume combo bonus for regular abilities
@@ -1970,12 +2084,12 @@ export function useGameLoop() {
         nextState = { ...nextState, inventory: lootResult.inventory, equippedGear: lootResult.equippedGear };
       }
 
-      nextState = applyAchievementRewards(nextState);
+      nextState = applyAchievementRewards(nextState, ACHIEVEMENTS, CLASS_INFO);
 
       const inventoryFull = nextState.inventory.length >= nextState.inventoryLimit;
       const shouldAutoRepeat = nextState.combatAutomation.autoRepeat && (!nextState.combatAutomation.stopOnInventoryFull || !inventoryFull);
       if (shouldAutoRepeat) {
-        const encounter = createCombatEncounter(nextState, level.id);
+        const encounter = createCombatEncounter(nextState, level.id, LEVELS, CLASS_INFO, ABILITY_DATABASE);
         if (encounter) {
           combatRef.current = encounter.combatData;
           return { ...nextState, combat: encounter.combat };
@@ -1985,7 +2099,7 @@ export function useGameLoop() {
       combatRef.current = null;
       return { ...nextState, combat: INITIAL_STATE.combat };
     });
-  }, []);
+  }, [LEVELS, CLASS_INFO, ABILITY_DATABASE, ACHIEVEMENTS, EQUIPMENT_DATABASE]);
 
   const endCombat = useCallback(() => {
     combatRef.current = null;
@@ -2000,9 +2114,10 @@ export function useGameLoop() {
     return () => clearInterval(interval);
   }, []);
 
-  const hardReset = useCallback(() => {
+  const hardReset = useCallback(async () => {
     if (window.confirm('Are you SURE? This will permanently delete ALL progress!')) {
       localStorage.removeItem(SAVE_KEY);
+      await savePlayerState(PLAYER_ID, INITIAL_STATE);
       combatRef.current = null;
       setState(INITIAL_STATE);
       window.location.reload();
@@ -2011,6 +2126,7 @@ export function useGameLoop() {
 
   return {
     state, isInitialized, heroStats,
+    CLASS_INFO, LEVELS, EQUIPMENT_DATABASE, MISSIONS, ABILITY_DATABASE, ACHIEVEMENTS, ARTIFACTS, CONSUMABLES, SHOP_ITEMS, TALENT_TREES,
     selectClass, allocateTalent, trainStat, getTrainingQuote,
     equipItem, sellItem, sellItemsByRarity, sellAllInventory, toggleItemLock, toggleItemFavorite, toggleAutoEquipUpgrades,
     unlockArtifact, toggleArtifactEquip, updateCombatAutomation,

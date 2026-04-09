@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { CLASS_INFO, STAT_TRAINING } from '@/lib/game/constants';
-import { GameState, UnitStats } from '@/lib/game/types';
+import { ClassInfo, GameState, UnitStats } from '@/lib/game/types';
 import { useSelectionScroll } from '@/lib/game/useSelectionScroll';
 
 type TrainingPurchaseAmount = 1 | 10 | 'max';
@@ -16,9 +16,10 @@ interface HeroPanelProps {
     totalCost: number;
     canAfford: boolean;
   };
+  classInfo: Record<NonNullable<GameState['heroClass']>, ClassInfo>;
 }
 
-export const HeroPanel: React.FC<HeroPanelProps> = ({ state, heroStats, onTrainStat, getTrainingQuote }) => {
+export const HeroPanel: React.FC<HeroPanelProps> = ({ state, heroStats, onTrainStat, getTrainingQuote, classInfo }) => {
   const [purchaseAmount, setPurchaseAmount] = useState<TrainingPurchaseAmount>(1);
   const [selectedStatIndex, setSelectedStatIndex] = useState(0);
   const registerSelectionTarget = useSelectionScroll<HTMLDivElement>(selectedStatIndex, [STAT_TRAINING.length]);
@@ -66,7 +67,7 @@ export const HeroPanel: React.FC<HeroPanelProps> = ({ state, heroStats, onTrainS
   }, [purchaseAmount, selectedStatIndex, onTrainStat, getTrainingQuote, purchaseOptions]);
 
   if (!state.heroClass) return null;
-  const info = CLASS_INFO[state.heroClass];
+  const info = classInfo[state.heroClass];
   const expPct = state.heroExpToNext > 0 ? (state.heroExp / state.heroExpToNext) * 100 : 0;
 
   return (

@@ -5,13 +5,21 @@ import { SHOP_ITEMS, EQUIPMENT_DATABASE, CONSUMABLES } from '@/lib/game/constant
 import { GameState, Equipment, Consumable } from '@/lib/game/types';
 import { useSelectionScroll } from '@/lib/game/useSelectionScroll';
 
+type ShopItem = {
+  equipmentId: string;
+  price: number;
+};
+
 interface ShopProps {
   state: GameState;
   onBuyItem: (equipmentId: string, price: number) => void;
   onBuyConsumable: (consumableId: string) => void;
+  shopItems: ShopItem[];
+  equipmentDatabase: Equipment[];
+  consumables: Consumable[];
 }
 
-export const Shop: React.FC<ShopProps> = ({ state, onBuyItem, onBuyConsumable }) => {
+export const Shop: React.FC<ShopProps> = ({ state, onBuyItem, onBuyConsumable, shopItems, equipmentDatabase, consumables }) => {
   const [activeShopTab, setActiveShopTab] = useState<'armory' | 'consumables'>('armory');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [purchaseAnimationId, setPurchaseAnimationId] = useState<string | null>(null);
@@ -25,8 +33,8 @@ export const Shop: React.FC<ShopProps> = ({ state, onBuyItem, onBuyConsumable })
     'Common': 1,
   };
 
-  const armoryItems = SHOP_ITEMS.map(item => {
-    const base = EQUIPMENT_DATABASE.find(e => e.id === item.equipmentId);
+  const armoryItems = (shopItems || []).map(item => {
+    const base = (equipmentDatabase || []).find(e => e.id === item.equipmentId);
     return { ...item, equipment: base };
   }).filter(entry => {
     if (!entry.equipment) return false;
@@ -42,7 +50,7 @@ export const Shop: React.FC<ShopProps> = ({ state, onBuyItem, onBuyConsumable })
     return a.price - b.price;
   }) as { equipmentId: string; price: number; equipment: Equipment }[];
 
-  const currentItems = activeShopTab === 'armory' ? armoryItems : CONSUMABLES;
+  const currentItems = activeShopTab === 'armory' ? armoryItems : (consumables || []);
   const registerSelectionTarget = useSelectionScroll<HTMLDivElement>(selectedIndex, [currentItems.length, activeShopTab]);
 
   const handleBuy = (id: string, price: number, isEquipment: boolean) => {
@@ -135,10 +143,11 @@ export const Shop: React.FC<ShopProps> = ({ state, onBuyItem, onBuyConsumable })
         {currentItems.map((item, index) => {
           const isSelected = index === selectedIndex;
           const canAfford = state.coins >= item.price;
-          const isEquipment = 'equipment' in item;
+          const equipment = 'equipment' in item ? item.equipment : null;
+          const baseItem: Equipment | Consumable = equipment ?? (item as Consumable);
+          const equipmentId = 'equipment' in item ? item.equipmentId : null;
+          const isEquipment = Boolean(equipment);
           const inventoryFull = isEquipment && state.inventory.length >= state.inventoryLimit;
-          
-          const baseItem = isEquipment ? (item as any).equipment as Equipment : (item as Consumable);
 
           return (
             <div
@@ -153,35 +162,35 @@ export const Shop: React.FC<ShopProps> = ({ state, onBuyItem, onBuyConsumable })
               )}
               <div className="flex items-center gap-4 relative z-0">
                 <div className={`flex h-12 w-12 items-center justify-center rounded-lg border-2 text-2xl ${
-                  !isEquipment ? 'border-emerald-500/50 bg-emerald-500/10' :
-                  baseItem.rarity === 'Godlike' ? 'border-fuchsia-500 bg-fuchsia-500/10' :
-                  baseItem.rarity === 'Legendary' ? 'border-orange-500 bg-orange-500/10' :
-                  baseItem.rarity === 'Epic' ? 'border-purple-500 bg-purple-500/10' :
-                  baseItem.rarity === 'Rare' ? 'border-blue-500 bg-blue-500/10' : 'border-border bg-muted/20'
+                  !equipment ? 'border-emerald-500/50 bg-emerald-500/10' :
+                  equipment.rarity === 'Godlike' ? 'border-fuchsia-500 bg-fuchsia-500/10' :
+                  equipment.rarity === 'Legendary' ? 'border-orange-500 bg-orange-500/10' :
+                  equipment.rarity === 'Epic' ? 'border-purple-500 bg-purple-500/10' :
+                  equipment.rarity === 'Rare' ? 'border-blue-500 bg-blue-500/10' : 'border-border bg-muted/20'
                 }`}>
                   {baseItem.icon}
                 </div>
                 <div>
                   <div className={`text-sm font-black uppercase italic ${
-                    !isEquipment ? 'text-emerald-400' :
-                    baseItem.rarity === 'Godlike' ? 'text-fuchsia-400' :
-                    baseItem.rarity === 'Legendary' ? 'text-orange-400' :
-                    baseItem.rarity === 'Epic' ? 'text-purple-400' :
-                    baseItem.rarity === 'Rare' ? 'text-blue-400' : 'text-foreground'
+                    !equipment ? 'text-emerald-400' :
+                    equipment.rarity === 'Godlike' ? 'text-fuchsia-400' :
+                    equipment.rarity === 'Legendary' ? 'text-orange-400' :
+                    equipment.rarity === 'Epic' ? 'text-purple-400' :
+                    equipment.rarity === 'Rare' ? 'text-blue-400' : 'text-foreground'
                   }`}>{baseItem.name}</div>
                   <div className="text-[10px] font-bold text-muted-foreground uppercase">
-                    {isEquipment ? `${baseItem.rarity} ${baseItem.slot}` : 'Consumable'}
+                    {equipment ? `${equipment.rarity} ${equipment.slot}` : 'Consumable'}
                   </div>
                   <div className="mt-1 flex gap-2 text-[9px] font-black uppercase">
-                    {isEquipment ? (
+                    {equipment ? (
                       <>
-                        {baseItem.stats.atk > 0 && <span className="text-red-400">ATK +{baseItem.stats.atk}</span>}
-                        {baseItem.stats.matk > 0 && <span className="text-orange-400">MATK +{baseItem.stats.matk}</span>}
-                        {baseItem.stats.hp > 0 && <span className="text-emerald-400">HP +{baseItem.stats.hp}</span>}
-                        {baseItem.stats.def > 0 && <span className="text-blue-400">DEF +{baseItem.stats.def}</span>}
-                        {baseItem.stats.spd > 0 && <span className="text-amber-400">SPD +{baseItem.stats.spd}</span>}
-                        {baseItem.stats.eva !== undefined && baseItem.stats.eva > 0 && <span className="text-purple-400">EVA +{(baseItem.stats.eva * 100).toFixed(0)}%</span>}
-                        {baseItem.stats.critChance !== undefined && baseItem.stats.critChance > 0 && <span className="text-red-400">CRIT +{(baseItem.stats.critChance * 100).toFixed(0)}%</span>}
+                        {(equipment.stats.atk ?? 0) > 0 && <span className="text-red-400">ATK +{equipment.stats.atk}</span>}
+                        {(equipment.stats.matk ?? 0) > 0 && <span className="text-orange-400">MATK +{equipment.stats.matk}</span>}
+                        {(equipment.stats.hp ?? 0) > 0 && <span className="text-emerald-400">HP +{equipment.stats.hp}</span>}
+                        {(equipment.stats.def ?? 0) > 0 && <span className="text-blue-400">DEF +{equipment.stats.def}</span>}
+                        {(equipment.stats.spd ?? 0) > 0 && <span className="text-amber-400">SPD +{equipment.stats.spd}</span>}
+                        {equipment.stats.eva !== undefined && equipment.stats.eva > 0 && <span className="text-purple-400">EVA +{(equipment.stats.eva * 100).toFixed(0)}%</span>}
+                        {equipment.stats.critChance !== undefined && equipment.stats.critChance > 0 && <span className="text-red-400">CRIT +{(equipment.stats.critChance * 100).toFixed(0)}%</span>}
                       </>
                     ) : (
                       <span className="text-muted-foreground normal-case italic">{baseItem.description}</span>
@@ -191,7 +200,7 @@ export const Shop: React.FC<ShopProps> = ({ state, onBuyItem, onBuyConsumable })
               </div>
 
               <button
-                onClick={() => isEquipment ? onBuyItem((item as any).equipmentId, item.price) : onBuyConsumable(item.id)}
+                onClick={() => equipment && equipmentId ? onBuyItem(equipmentId, item.price) : onBuyConsumable(baseItem.id)}
                 disabled={!canAfford || inventoryFull}
                 className={`rounded-lg border-2 px-6 py-2 text-[10px] font-black uppercase tracking-widest transition-all ${
                   canAfford && !inventoryFull

@@ -3,7 +3,7 @@
 import React from 'react';
 import { ARTIFACTS, CLASS_INFO, resolveAbilityLoadout } from '@/lib/game/constants';
 import { computeHeroBonuses } from '@/lib/game/useGameLoop';
-import { Equipment, EquipmentSlot, GameState, UnitStats } from '@/lib/game/types';
+import { Artifact, ClassInfo, CombatAbilityDefinition, Equipment, EquipmentSlot, GameState, UnitStats } from '@/lib/game/types';
 
 interface CharacterPanelProps {
   state: GameState;
@@ -17,6 +17,9 @@ interface CharacterPanelProps {
   onToggleAutoEquipUpgrades: () => void;
   onUnlockArtifact: (artifactId: string) => void;
   onToggleArtifactEquip: (artifactId: string) => void;
+  classInfo: Record<NonNullable<GameState['heroClass']>, ClassInfo>;
+  artifactDatabase: Artifact[];
+  abilityDatabase: Record<string, CombatAbilityDefinition>;
 }
 
 const RARITY_VALUE: Record<Equipment['rarity'], number> = {
@@ -60,13 +63,19 @@ export const CharacterPanel: React.FC<CharacterPanelProps> = ({
   onToggleAutoEquipUpgrades,
   onUnlockArtifact,
   onToggleArtifactEquip,
+  classInfo,
+  artifactDatabase,
+  abilityDatabase,
 }) => {
   if (!state.heroClass) return null;
 
   const heroClass = state.heroClass;
-  const heroInfo = CLASS_INFO[heroClass];
+  const heroInfo = classInfo[heroClass];
   const heroBonuses = computeHeroBonuses(state.talentsOwned, heroClass);
-  const abilities = resolveAbilityLoadout(heroClass, heroBonuses.specials);
+  const abilities = resolveAbilityLoadout(heroClass, heroBonuses.specials).map(idOrDef => {
+    const id = typeof idOrDef === 'string' ? idOrDef : idOrDef.id;
+    return abilityDatabase[id];
+  }).filter(Boolean);
   const equippedIds = new Set(Object.values(state.equippedGear).filter((itemId): itemId is string => Boolean(itemId)));
   const lockedIds = new Set(state.lockedItemIds);
   const favoriteIds = new Set(state.favoriteItemIds);
@@ -250,7 +259,7 @@ export const CharacterPanel: React.FC<CharacterPanelProps> = ({
               </span>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              {ARTIFACTS.map((artifact) => {
+              {(artifactDatabase || []).map((artifact) => {
                 const owned = state.artifactsOwned.includes(artifact.id);
                 const equipped = state.equippedArtifacts.includes(artifact.id);
                 const canEquip = owned && (equipped || state.equippedArtifacts.length < state.artifactSlots);

@@ -100,8 +100,10 @@ export interface CombatTurn {
 
 export interface UnitInstance {
   instanceId: string;
+  id: string;
   type: UnitType;
   name: string;
+  icon: string;
   stats: UnitStats;
   isPlayer: boolean;
   maxHp: number;

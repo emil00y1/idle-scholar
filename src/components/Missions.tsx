@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { GameState } from '@/lib/game/types';
+import { Mission } from '@/lib/game/types';
 import { MISSIONS, scaleMissionRewards } from '@/lib/game/constants';
 import { useSelectionScroll } from '@/lib/game/useSelectionScroll';
 
@@ -10,6 +11,7 @@ interface MissionsProps {
   onStartMission: (missionId: string) => void;
   onCollectMission: (missionId: string) => void;
   onCancelMission: (missionId: string) => void;
+  missions: Mission[];
 }
 
 const CATEGORY_INFO = {
@@ -59,7 +61,7 @@ function formatNumber(num: number) {
   return num.toLocaleString();
 }
 
-export function Missions({ state, onStartMission, onCollectMission, onCancelMission }: MissionsProps) {
+export function Missions({ state, onStartMission, onCollectMission, onCancelMission, missions }: MissionsProps) {
   const [activeCategory, setActiveCategory] = useState<keyof typeof CATEGORY_INFO>('patrol');
   const [selectedSection, setSelectedSection] = useState<'active' | 'board'>(state.activeMissions.length > 0 ? 'active' : 'board');
   const [selectedMissionIndex, setSelectedMissionIndex] = useState(0);
@@ -67,11 +69,11 @@ export function Missions({ state, onStartMission, onCollectMission, onCancelMiss
   const [now, setNow] = useState(Date.now());
 
   const categories = Object.keys(CATEGORY_INFO) as (keyof typeof CATEGORY_INFO)[];
-  const currentMissions = MISSIONS.filter(m => m.category === activeCategory);
+  const currentMissions = (missions || []).filter(m => m.category === activeCategory);
 
   // Active missions with completion status
   const activeMissionsData = state.activeMissions.map(am => {
-    const mission = MISSIONS.find(m => m.id === am.missionId)!;
+    const mission = (missions || []).find(m => m.id === am.missionId)!;
     const remaining = am.endsAt - now;
     const elapsed = now - am.startedAt;
     const total = am.endsAt - am.startedAt;
@@ -300,10 +302,10 @@ export function Missions({ state, onStartMission, onCollectMission, onCancelMiss
           {categories.map(cat => {
             const info = CATEGORY_INFO[cat];
             const isSelectedTab = activeCategory === cat;
-            const available = MISSIONS.filter(
+            const available = (missions || []).filter(
               m => m.category === cat && state.heroLevel >= m.requiredLevel
             ).length;
-            const total = MISSIONS.filter(m => m.category === cat).length;
+            const total = (missions || []).filter(m => m.category === cat).length;
             return (
               <button
                 key={cat}

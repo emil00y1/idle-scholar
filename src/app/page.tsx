@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useGameLoop } from '@/lib/game/useGameLoop';
-import { CLASS_INFO, ACHIEVEMENTS, ARTIFACTS, MISSIONS } from '@/lib/game/constants';
 import { ClassSelection } from '@/components/ClassSelection';
 import { HeroPanel } from '@/components/HeroPanel';
 import { CombatView } from '@/components/CombatView';
@@ -15,8 +14,10 @@ import { Shop } from '@/components/Shop';
 export default function Home() {
   const {
     state, isInitialized, heroStats,
+    CLASS_INFO, ACHIEVEMENTS, ARTIFACTS, MISSIONS, LEVELS, ABILITY_DATABASE,
+    SHOP_ITEMS, EQUIPMENT_DATABASE, CONSUMABLES, TALENT_TREES,
     selectClass, allocateTalent, trainStat, getTrainingQuote,
-    equipItem, sellItem, sellItemsByRarity, toggleItemLock, toggleItemFavorite, toggleAutoEquipUpgrades,
+    equipItem, sellItem, sellItemsByRarity, sellAllInventory, toggleItemLock, toggleItemFavorite, toggleAutoEquipUpgrades,
     unlockArtifact, toggleArtifactEquip, updateCombatAutomation,
     startMission, collectMission, cancelMission, buyItem, buyConsumable,
     startCombat, processCombatTick, useAbility, useConsumable, collectRewards, endCombat, hardReset,
@@ -74,7 +75,7 @@ export default function Home() {
   if (!state.heroClass) {
     return (
       <main className="min-h-screen font-sans selection:bg-primary selection:text-primary-foreground bg-background text-foreground">
-        <ClassSelection onSelect={selectClass} />
+        <ClassSelection onSelect={selectClass} classInfo={CLASS_INFO} />
       </main>
     );
   }
@@ -134,9 +135,11 @@ export default function Home() {
             onProcessTick={processCombatTick}
             onUseAbility={useAbility}
             onUseConsumable={useConsumable}
-            onCollectRewards={collectRewards}            onEndCombat={endCombat}
+            onCollectRewards={collectRewards}
+            onEndCombat={endCombat}
             onToggleAutoRepeat={() => updateCombatAutomation({ autoRepeat: !state.combatAutomation.autoRepeat })}
             onToggleStopOnInventoryFull={() => updateCombatAutomation({ stopOnInventoryFull: !state.combatAutomation.stopOnInventoryFull })}
+            consumables={CONSUMABLES}
           />
         ) : (
           <div className="grid lg:grid-cols-[1fr_340px] gap-4 md:gap-8">
@@ -181,10 +184,18 @@ export default function Home() {
                     onStartCombat={startCombat}
                     onToggleAutoRepeat={() => updateCombatAutomation({ autoRepeat: !state.combatAutomation.autoRepeat })}
                     onToggleStopOnInventoryFull={() => updateCombatAutomation({ stopOnInventoryFull: !state.combatAutomation.stopOnInventoryFull })}
+                    levels={LEVELS}
                   />
                 )}
                 {activeTab === 'shop' && (
-                  <Shop state={state} onBuyItem={buyItem} onBuyConsumable={buyConsumable} />
+                  <Shop 
+                    state={state} 
+                    onBuyItem={buyItem} 
+                    onBuyConsumable={buyConsumable} 
+                    shopItems={SHOP_ITEMS}
+                    equipmentDatabase={EQUIPMENT_DATABASE}
+                    consumables={CONSUMABLES}
+                  />
                 )}
                 {activeTab === 'missions' && (
                   <Missions
@@ -192,6 +203,7 @@ export default function Home() {
                     onStartMission={startMission}
                     onCollectMission={collectMission}
                     onCancelMission={cancelMission}
+                    missions={MISSIONS}
                   />
                 )}
                 {activeTab === 'hero' && heroStats && (
@@ -200,9 +212,10 @@ export default function Home() {
                     heroStats={heroStats}
                     onTrainStat={trainStat}
                     getTrainingQuote={getTrainingQuote}
+                    classInfo={CLASS_INFO}
                   />
                 )}
-                {activeTab === 'character' && (
+                {activeTab === 'character' && heroStats && (
                   <CharacterPanel
                     state={state}
                     heroStats={heroStats}
@@ -215,11 +228,14 @@ export default function Home() {
                     onToggleAutoEquipUpgrades={toggleAutoEquipUpgrades}
                     onUnlockArtifact={unlockArtifact}
                     onToggleArtifactEquip={toggleArtifactEquip}
+                    classInfo={CLASS_INFO}
+                    artifactDatabase={ARTIFACTS}
+                    abilityDatabase={ABILITY_DATABASE}
                   />
                 )}
                 {activeTab === 'talents' && (
                   <div className="-mx-2 md:-mx-4">
-                    <TalentTree state={state} onAllocate={allocateTalent} />
+                    <TalentTree state={state} onAllocate={allocateTalent} talentTrees={TALENT_TREES} />
                   </div>
                 )}
                 {activeTab === 'library' && (
